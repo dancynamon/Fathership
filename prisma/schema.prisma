@@ -1,0 +1,143 @@
+// Fathership data model.
+// SQLite for the POC (no enum support). Switch to "postgresql" for prod and
+// the same schema works — strings are fine, or you can promote them to enums.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Role:           "SHIPPER" | "CARRIER" | "ADMIN"
+// LoadType:       "PALLET" | "TRUCKLOAD"
+// EquipmentType:  "DRY_VAN" | "REEFER" | "FLATBED" | "STEP_DECK" | "HOTSHOT" | "POWER_ONLY" | "LTL_53" | "LTL_28"
+// ServiceLevel:   "STANDARD" | "GUARANTEED" | "EXPEDITED"
+// ShipmentStatus: "QUOTED" | "BOOKED" | "DISPATCHED" | "PICKED_UP" | "IN_TRANSIT" | "DELIVERED" | "CANCELED" | "EXCEPTION"
+// FreightClass:   "50" | "55" | "60" | "65" | "70" | "77.5" | "85" | "92.5" | "100" | "110" | "125" | "150" | "175" | "200" | "250" | "300" | "400" | "500"
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  company      String?
+  phone        String?
+  role         String     @default("SHIPPER")
+  createdAt    DateTime   @default(now())
+  shipments    Shipment[] @relation("ShipperShipments")
+  carrierLoads Shipment[] @relation("CarrierShipments")
+  quotes       Quote[]
+}
+
+model Quote {
+  id            String       @id @default(cuid())
+  userId        String?
+  user          User?        @relation(fields: [userId], references: [id])
+  loadType      String
+  originZip     String
+  originCity    String?
+  originState   String?
+  destZip       String
+  destCity      String?
+  destState     String?
+  pickupDate    DateTime
+  equipment     String
+  serviceLevel  String       @default("STANDARD")
+  weightLbs     Int
+  palletCount   Int?
+  freightClass  String?
+  commodity     String?
+  declaredValue Int?
+  liftgate      Boolean      @default(false)
+  residential   Boolean      @default(false)
+  insidePickup  Boolean      @default(false)
+  insideDelivery Boolean     @default(false)
+  createdAt     DateTime     @default(now())
+  options       QuoteOption[]
+  shipments     Shipment[]
+}
+
+model QuoteOption {
+  id             String   @id @default(cuid())
+  quoteId        String
+  quote          Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  carrierName    String
+  carrierLogoSlug String?
+  serviceLabel   String
+  transitDays    Int
+  baseCents      Int
+  fuelCents      Int
+  accessorialsCents Int
+  markupCents    Int
+  totalCents     Int
+  guaranteed     Boolean  @default(false)
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  shipments      Shipment[]
+}
+
+model Shipment {
+  id              String         @id @default(cuid())
+  refNumber       String         @unique
+  quoteId         String?
+  quote           Quote?         @relation(fields: [quoteId], references: [id])
+  quoteOptionId   String?
+  quoteOption     QuoteOption?   @relation(fields: [quoteOptionId], references: [id])
+  shipperId       String
+  shipper         User           @relation("ShipperShipments", fields: [shipperId], references: [id])
+  carrierId       String?
+  carrier         User?          @relation("CarrierShipments", fields: [carrierId], references: [id])
+  carrierName     String
+  status          String         @default("BOOKED")
+  loadType        String
+  equipment       String
+  serviceLevel    String
+  originName      String
+  originAddress   String
+  originCity      String
+  originState     String
+  originZip       String
+  originContact   String?
+  originPhone     String?
+  destName        String
+  destAddress     String
+  destCity        String
+  destState       String
+  destZip         String
+  destContact     String?
+  destPhone       String?
+  pickupDate      DateTime
+  deliveryDate    DateTime?
+  weightLbs       Int
+  palletCount     Int?
+  commodity       String?
+  totalCents      Int
+  poNumber        String?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  events          TrackingEvent[]
+}
+
+model TrackingEvent {
+  id          String         @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status      String
+  location    String?
+  note        String?
+  createdAt   DateTime       @default(now())
+}
+
+model Lane {
+  id           String   @id @default(cuid())
+  originZip    String
+  destZip      String
+  miles        Int
+  baseRateCpm  Int
+  createdAt    DateTime @default(now())
+
+  @@unique([originZip, destZip])
+}
