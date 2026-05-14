@@ -4,13 +4,14 @@ A 3PL platform for **pallet and truckload freight** — instant multi-carrier ra
 one-click booking, real-time tracking, and a carrier loadboard. Modeled loosely
 on Mothership; built as a POC.
 
-## Status: proof of concept
+## Status: proof of concept → real rates path wired
 
-Today this is a working end-to-end app with **mock rates** that look real but
-aren't pulled from any carrier. Direct carrier integrations
-(XPO, Estes, ODFL, SAIA, ArcBest, FedEx Freight, R+L, Knight-Swift, Schneider,
-Werner) or aggregators (Project44, Banyan) drop in behind the
-`RatesProvider` interface at `src/lib/rates/`.
+Today the app runs end-to-end with **mock rates** by default
+(`RATES_PROVIDER=mock`). Direct carrier providers for **FedEx Freight**,
+**Estes Express**, and **Old Dominion (ODFL)** are scaffolded and activate
+the moment you drop their credentials into `.env` and set
+`RATES_PROVIDER=live`. See [`docs/CARRIERS.md`](./docs/CARRIERS.md) for the
+sign-up walkthrough — all three carriers are free with a shipper account.
 
 ## Stack
 
@@ -62,10 +63,26 @@ The pricing flow lives in `src/lib/rates/`:
 
 - `types.ts` — `RatesProvider`, `RateQuoteRequest`, `RateOption`
 - `distance.ts` — POC ZIP-to-ZIP mileage (great-circle × driving factor)
-- `providers/mock.ts` — `MockRatesProvider`: 10 carriers, freight-class
-  multipliers, fuel surcharge, accessorials, service-level multipliers,
-  configurable markup
-- `index.ts` — selector keyed on `RATES_PROVIDER`
+- `markup.ts` — central Fathership service fee (`RATES_MARKUP`)
+- `http.ts` — fetch-with-timeout + OAuth2 token cache for carrier APIs
+- `providers/mock.ts` — `MockRatesProvider`: 10 simulated carriers
+- `providers/fedex_freight.ts` — FedEx Freight LTL (OAuth2)
+- `providers/estes.ts` — Estes Express LTL (API key)
+- `providers/odfl.ts` — Old Dominion LTL (HTTP Basic)
+- `providers/multi.ts` — `MultiProvider`: parallel fanout, failure isolation,
+  dedupe by (carrier, service)
+- `index.ts` — selector (`mock` or `live`) and `quoteWithMarkup()` helper
+
+### Switching to live rates
+
+```
+RATES_PROVIDER=live
+# Then fill in any of FEDEX_*, ESTES_*, ODFL_* in .env.
+```
+
+Unconfigured providers are skipped. If none are configured, the selector
+falls back to `mock` so the app keeps working. Full sign-up walkthrough:
+[`docs/CARRIERS.md`](./docs/CARRIERS.md).
 
 ### Pricing breakdown (every quote returns it)
 
@@ -74,18 +91,17 @@ The pricing flow lives in `src/lib/rates/`:
 - **Accessorials** — liftgate, residential, inside pickup/delivery, declared value
 - **Fathership service fee** — configurable markup (`RATES_MARKUP`, default 10%)
 
-### Production path — direct carrier APIs
+### Adding more carriers
 
-Replace `MockRatesProvider` with a fanout that hits real carrier APIs
-in parallel and normalizes responses into `RateOption`. Recommended order
-based on coverage:
+To add SAIA, XPO, ArcBest, R+L, etc.: create
+`src/lib/rates/providers/<carrier>.ts` implementing `RatesProvider`, add an
+`isConfigured()` static, and push it into `buildLiveProvider()` in
+`src/lib/rates/index.ts`. The `MultiProvider` handles fanout, failure
+isolation, dedupe, and central markup automatically. See
+[`docs/CARRIERS.md`](./docs/CARRIERS.md) for the playbook.
 
-1. **Project44** (aggregates LTL nationwide) — fastest path to real rates
-2. **Direct LTL** — Estes, ODFL, XPO, SAIA, FedEx Freight, ArcBest
-3. **Truckload** — DAT Power / Truckstop spot, plus contracted carriers
-
-A `MultiProvider` that races a few providers per request and merges results is
-the typical pattern.
+For truckload spot rates, the pattern is the same (DAT Power, Truckstop) but
+those APIs are paid subscriptions.
 
 ## Architecture notes
 

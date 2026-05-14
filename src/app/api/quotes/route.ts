@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getRatesProvider } from "@/lib/rates";
+import { quoteWithMarkup } from "@/lib/rates";
 import { currentUser } from "@/lib/session";
 import { quoteRequestSchema } from "@/lib/validation";
 
@@ -13,8 +13,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
-  const provider = getRatesProvider();
-  const options = await provider.quote({
+  const options = await quoteWithMarkup({
     loadType: input.loadType,
     originZip: input.originZip,
     destZip: input.destZip,

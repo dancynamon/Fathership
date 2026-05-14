@@ -81,19 +81,11 @@ function jitter(seed: string, low: number, high: number) {
   return low + ((h % 10_000) / 10_000) * (high - low);
 }
 
-function getMarkup() {
-  const raw = process.env.RATES_MARKUP;
-  const v = raw ? Number(raw) : 0.1;
-  if (!Number.isFinite(v) || v < 0) return 0.1;
-  return v;
-}
-
 export class MockRatesProvider implements RatesProvider {
   name = "mock";
 
   async quote(req: RateQuoteRequest): Promise<RateOption[]> {
     const miles = estimateMiles(req.originZip, req.destZip);
-    const markup = getMarkup();
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(); // 24h
     const seedRoot = `${req.originZip}-${req.destZip}-${req.loadType}-${req.equipment}`;
     const isTL = req.loadType === "TRUCKLOAD";
@@ -102,7 +94,6 @@ export class MockRatesProvider implements RatesProvider {
 
     const options = eligible.map<RateOption>((c) => {
       const cpm = isTL ? c.cpmTL : c.cpmLTL;
-      // Linehaul. TL is straight $/mile. LTL uses weight + class + mileage proxy.
       let linehaul = 0;
       if (isTL) {
         linehaul = cpm * miles;
@@ -112,36 +103,35 @@ export class MockRatesProvider implements RatesProvider {
         linehaul = cpm * miles * 0.45 + weightFactor * 850 * classMul + (req.palletCount ?? 0) * 1800;
         linehaul = Math.max(linehaul, c.minCharge);
       }
-      // Apply service-level multiplier and per-carrier jitter ±5%.
       const svc = serviceMultiplier(req.serviceLevel);
       const j = jitter(seedRoot + c.slug, 0.95, 1.05);
       const baseCents = Math.round(linehaul * svc * j);
       const fuelCents = Math.round(baseCents * c.fuelPct);
       const accCents = accessorialsCents(req, baseCents);
       const subtotal = baseCents + fuelCents + accCents;
-      const markupCents = Math.round(subtotal * markup);
-      const totalCents = subtotal + markupCents;
 
+      // Markup applied centrally by MultiProvider / applyMarkup; provider
+      // returns raw carrier prices.
       return {
         carrierName: c.name,
         carrierLogoSlug: c.slug,
-        serviceLabel: req.serviceLevel === "GUARANTEED" && c.guaranteedAvailable
-          ? `${c.serviceLabel} · Guaranteed`
-          : req.serviceLevel === "EXPEDITED"
-            ? `${c.serviceLabel} · Expedited`
-            : c.serviceLabel,
+        serviceLabel:
+          req.serviceLevel === "GUARANTEED" && c.guaranteedAvailable
+            ? `${c.serviceLabel} · Guaranteed`
+            : req.serviceLevel === "EXPEDITED"
+              ? `${c.serviceLabel} · Expedited`
+              : c.serviceLabel,
         transitDays: transitDays(c, miles, req.serviceLevel),
         baseCents,
         fuelCents,
         accessorialsCents: accCents,
-        markupCents,
-        totalCents,
+        markupCents: 0,
+        totalCents: subtotal,
         guaranteed: req.serviceLevel === "GUARANTEED" && c.guaranteedAvailable,
         expiresAt,
       };
     });
 
-    // Sort by total then by reliability (cheapest first, but break ties on quality)
     options.sort((a, b) => a.totalCents - b.totalCents);
     return options;
   }
